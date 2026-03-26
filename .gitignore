@@ -1,0 +1,30 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual env
+.venv/
+venv/
+
+# Training artifacts
+checkpoints/
+logs/
+system/output_masks/
+system/uploads/
+
+# Large model/data artifacts
+*.pth
+*.pt
+*.ckpt
+*.npz
+*.npy
+
+# TensorBoard
+**/events.out.tfevents.*
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
