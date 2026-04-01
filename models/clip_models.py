@@ -4,7 +4,7 @@ import torch
 import torch.nn.functional as F
 import models.networks.customnet as customnetworks
 from models.clip.model import ResidualAttentionBlock
-from models.NoiseView.NoiseView import DCTHighPass, SpatialFrequencyFusion, CBAMFusion, GroupCBAMEnhancer, GroupSpatialFrequencyFusion
+from models.NoiseView.NoiseView import DCTHighPass, DWTHighPass, SpatialFrequencyFusion, CBAMFusion, GroupCBAMEnhancer, GroupSpatialFrequencyFusion
 from models.decoder.ASPP import CLIP_ASPP_Adapter
 from models.decoder.ConPRN import ContrastiveRPN
 from models.decoder.detector import ForgeryDetector
@@ -12,7 +12,7 @@ import re
 
 # Model for localisation
 class CLIPModelLocalisation(nn.Module):
-    def __init__(self, name, intermidiate_layer_output = None, decoder_type = "conv-4", use_noise_view = False, use_noise_guided_amplification = False, use_aspp = False, use_conprn = False, use_simdet = False):
+    def __init__(self, name, intermidiate_layer_output = None, decoder_type = "conv-4", use_noise_view = False, noise_extractor = "dct", use_noise_guided_amplification = False, use_aspp = False, use_conprn = False, use_simdet = False):
         super(CLIPModelLocalisation, self).__init__()
         
         self.intermidiate_layer_output = intermidiate_layer_output
@@ -26,6 +26,7 @@ class CLIPModelLocalisation(nn.Module):
         self._set_decoder()
         # ADD: Noise View
         self.use_noise_view = use_noise_view
+        self.noise_extractor_name = noise_extractor
         self.use_noise_guided_amplification = use_noise_guided_amplification
         self._last_noise_map = None
         self._set_noise_view(self.use_noise_view)
@@ -126,14 +127,15 @@ class CLIPModelLocalisation(nn.Module):
     #ADD
     def _set_noise_view(self, use_noise_view):
         print(f"Using {use_noise_view} noise view")
+        if self.noise_extractor_name == "dwt":
+            self.noise_extractor = DWTHighPass(levels=2)
+        else:
+            self.noise_extractor = DCTHighPass(kernel_size=8)
         if use_noise_view == "light":
-            self.DCTHighPass = DCTHighPass(kernel_size=8)
             self.noise_fusion = SpatialFrequencyFusion()
         elif use_noise_view == "cbam":
-            self.DCTHighPass = DCTHighPass(kernel_size=8)
             self.noise_fusion = CBAMFusion()
         elif use_noise_view == "group":
-            self.DCTHighPass = DCTHighPass(kernel_size=8)
             # self.noise_fusion = GroupCBAMEnhancer()
             self.noise_fusion = GroupSpatialFrequencyFusion(num_groups=8)
             
@@ -214,12 +216,12 @@ class CLIPModelLocalisation(nn.Module):
 
     # new
     def _apply_noise_guided_amplification(self, features, x):
-        if not self.use_noise_guided_amplification or not self.use_noise_view or not hasattr(self, "DCTHighPass"):
+        if not self.use_noise_guided_amplification or not self.use_noise_view or not hasattr(self, "noise_extractor"):
             return features
 
         noise_map = self._last_noise_map
         if noise_map is None or noise_map.size(0) != x.size(0) or noise_map.shape[-2:] != x.shape[-2:]:
-            noise_map = self.DCTHighPass(x)
+            noise_map = self.noise_extractor(x)
 
         if features.dim() == 3 and features.size(0) > 1:
             token_count = features.size(0) - 1
@@ -278,7 +280,7 @@ class CLIPModelLocalisation(nn.Module):
             if self.use_noise_view and not noise_view:
                 # features = self.NoiseViewGenerator(features, x)
                 # DCT频域处理
-                dct_map = self.DCTHighPass(x)  # [B, 1, H, W]
+                dct_map = self.noise_extractor(x)  # [B, 1, H, W]
                 self._last_noise_map = dct_map
                 dct_input = dct_map.repeat(1, 3, 1, 1)  # 通道复制 [B, 3, H, W]
                 dct_features = self.feature_extraction(dct_input, noise_view=True)  # [257, B, 1024]
@@ -286,6 +288,9 @@ class CLIPModelLocalisation(nn.Module):
                 features = self.noise_fusion(features, dct_features) # [257, B, 1024]
                 # print(f"Using noise view: {self.use_noise_view}, features shape: {features.shape}")
 
+            # Apply NAA on encoder tokens right after noise fusion and before ASPP.
+            if self.use_noise_guided_amplification and not noise_view:
+                features = self._apply_noise_guided_amplification(features, x)
 
             # ADD
             if self.use_aspp:
@@ -316,8 +321,6 @@ class CLIPModelLocalisation(nn.Module):
         # Feature extraction
         self._last_noise_map = None
         features = self.feature_extraction(x)
-        if self.use_noise_guided_amplification:
-            features = self._apply_noise_guided_amplification(features, x)
 
         # ADD: SimDet
         if self.use_simdet:

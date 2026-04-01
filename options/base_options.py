@@ -22,6 +22,7 @@ class BaseOptions():
         
         # ADD
         parser.add_argument('--use_noise_view', type=str, default=None, help='use noise view for feature extraction')
+        parser.add_argument('--noise_extractor', type=str, default='dct', choices=['dct', 'dwt'], help='noise extractor used to build the auxiliary noise map')
         parser.add_argument('--use_noise_guided_amplification', action='store_true', help='apply optional noise-guided amplification after feature extraction')
         parser.add_argument('--use_area_loss', action='store_true', help='use area loss')
         parser.add_argument('--use_aspp', action='store_true', help='use aspp module')

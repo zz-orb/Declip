@@ -58,6 +58,60 @@ class DCTHighPass(nn.Module):
         
         return output
 
+class DWTHighPass(nn.Module):
+    def __init__(self, levels=2, combine_mode="l1", eps=1e-6):
+        super().__init__()
+        self.levels = levels
+        self.combine_mode = combine_mode
+        self.eps = eps
+
+        ll = torch.tensor([[0.5, 0.5], [0.5, 0.5]], dtype=torch.float32)
+        lh = torch.tensor([[0.5, 0.5], [-0.5, -0.5]], dtype=torch.float32)
+        hl = torch.tensor([[0.5, -0.5], [0.5, -0.5]], dtype=torch.float32)
+        hh = torch.tensor([[0.5, -0.5], [-0.5, 0.5]], dtype=torch.float32)
+
+        self.register_buffer("ll_filter", ll.view(1, 1, 2, 2))
+        self.register_buffer("lh_filter", lh.view(1, 1, 2, 2))
+        self.register_buffer("hl_filter", hl.view(1, 1, 2, 2))
+        self.register_buffer("hh_filter", hh.view(1, 1, 2, 2))
+
+    def _to_gray(self, x):
+        gray = 0.299 * x[:, 0] + 0.587 * x[:, 1] + 0.114 * x[:, 2]
+        return gray.unsqueeze(1)
+
+    def _pad_even(self, x):
+        pad_h = x.shape[-2] % 2
+        pad_w = x.shape[-1] % 2
+        if pad_h or pad_w:
+            x = F.pad(x, (0, pad_w, 0, pad_h), mode="reflect")
+        return x
+
+    def _detail_response(self, lh, hl, hh):
+        if self.combine_mode == "l2":
+            return torch.sqrt(lh.pow(2) + hl.pow(2) + hh.pow(2) + self.eps)
+        return (lh.abs() + hl.abs() + hh.abs()) / 3.0
+
+    def forward(self, x):
+        _, _, h, w = x.shape
+        current = self._to_gray(x)
+        detail_maps = []
+
+        for _ in range(self.levels):
+            current = self._pad_even(current)
+            ll = F.conv2d(current, self.ll_filter, stride=2)
+            lh = F.conv2d(current, self.lh_filter, stride=2)
+            hl = F.conv2d(current, self.hl_filter, stride=2)
+            hh = F.conv2d(current, self.hh_filter, stride=2)
+
+            detail = self._detail_response(lh, hl, hh)
+            detail = F.interpolate(detail, size=(h, w), mode="bilinear", align_corners=False)
+            detail_maps.append(detail)
+            current = ll
+
+        if not detail_maps:
+            return torch.zeros(x.size(0), 1, h, w, device=x.device, dtype=x.dtype)
+
+        return torch.stack(detail_maps, dim=0).mean(dim=0)
 # Light
 class SpatialFrequencyFusion(nn.Module):
     def __init__(self):

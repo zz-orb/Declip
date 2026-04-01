@@ -14,6 +14,7 @@ def get_model(opt):
     
     # ADD
     use_noise_view = opt.use_noise_view
+    noise_extractor = opt.noise_extractor
     use_noise_guided_amplification = opt.use_noise_guided_amplification
     use_aspp = opt.use_aspp
     use_conprn = opt.use_conprn
@@ -25,6 +26,7 @@ def get_model(opt):
                                  intermidiate_layer_output = layer, 
                                  decoder_type=decoder_type,
                                  use_noise_view=use_noise_view,
+                                 noise_extractor=noise_extractor,
                                  use_aspp=use_aspp,
                                  use_noise_guided_amplification=use_noise_guided_amplification,
                                  use_conprn=use_conprn,
